@@ -1,6 +1,9 @@
 import time
 from datetime import datetime, timedelta
+from functools import cache
+
 import tzlocal
+from cachetools import cached, LRUCache, TTLCache
 
 import falcon
 from falcon import HTTPTemporaryRedirect, HTTPFound
@@ -44,6 +47,8 @@ from device.version import Version  # type: ignore
 from device import telescope
 import threading
 import pydash
+
+from lib.telescope_devices import get_telescope_devices, TelescopeDevice
 
 logger = init_logging()
 load = Loader('data/')
@@ -94,7 +99,6 @@ def get_platform():
 
     return plat
 
-base_url = "http://" + get_listening_ip() + ":" + str(Config.port)
 simbad_url = 'https://simbad.cds.unistra.fr/simbad/sim-id?output.format=ASCII&obj.bibsel=off&Ident='
 messages = []
 online = None
@@ -123,17 +127,79 @@ def get_messages():
     return []
 
 
-def get_telescopes():
-    telescopes = Config.seestars
-    return list(telescopes)
+@cache
+def get_remote_telescopes():
+    remote_num = 100
+    remote_telescopes = []
+    # TODO include ports of remote!
+    for remote in Config.remotes:
+        ip_address = remote.get('ip_address')
+        remotes = get_telescope_devices(ip_address, 5555, remote_num)
+        remote_telescopes.extend(remotes)
+        # name, device_num
+        # r = requests.get(f"http://{ip_address}:5555/management/v1/configureddevices", timeout=Config.timeout)
+        # r.raise_for_status()
+        # response = r.json()
+        # values = response.get('Value')
+        # if len(values) == 1 and values[0].get('DeviceNumber') == 0:
+        #     values[0]['DeviceNumber'] = 1
+        # for tel in response.get('Value'):
+        #     remote_telescopes.append({
+        #         'name': tel['DeviceName'],
+        #         'device_num': remote_num + tel['DeviceNumber'],
+        #         'ip_address': ip_address,
+        #         'api_ip_address': ip_address,
+        #         'img_port': '7556',  # Todo : make this dynamic!
+        #         'location': remote.get('location'),
+        #         'remote_id': remote_num,
+        #     })
+        remote_num += 100
+    return remote_telescopes
 
 
-def get_telescope(telescope_id):
+@cached(cache=TTLCache(maxsize=600, ttl=10))
+def get_telescopes() -> list[TelescopeDevice]:
+    # Todo : include local and remote telescopes
+    # telescopes = Config.seestars
+    # return list(telescopes)
+    telescopes = list([{
+        **dev,
+        'ip_address': dev['ip_address'],
+        'api_ip_address': get_listening_ip(),
+        'location': 'internal',
+        'telescope_id': dev['device_num'],
+        'remote_id': 0,
+    } for dev in Config.seestars])
+
+    ip_address = get_listening_ip()
+    remotes = get_telescope_devices(ip_address)
+
+    print("Local list:", telescopes)
+    print("Remote list:", remotes)
+
+    return remotes
+
+
+def get_telescope(telescope_id: int) -> TelescopeDevice:
     telescopes = get_telescopes()
     return list(filter(lambda telescope: telescope['device_num'] == telescope_id, telescopes))[0]
 
 
-def get_root(telescope_id):
+def base_url(telescope_id: int):
+    # print("base_url for telescope", telescope_id)
+    real_telescope_id = telescope_id
+    if telescope_id > 99:
+        tel = get_telescope(telescope_id)
+
+        real_telescope_id = tel['device_num'] - tel['remote_id']
+        # real_telescope_id = tel['device_num']
+
+        return ["http://" + tel['api_ip_address'], real_telescope_id]
+
+    return ["http://" + get_listening_ip(), real_telescope_id]
+
+
+def get_root(telescope_id: int):
     if telescope_id == 0:
         root = f"/0"
         return root
@@ -148,7 +214,7 @@ def get_root(telescope_id):
     return ""
 
 
-def get_imager_root(telescope_id):
+def get_imager_root(telescope_id: int):
     if telescope_id > 0:
         telescopes = get_telescopes()
         # if len(telescopes) == 1:
@@ -156,7 +222,9 @@ def get_imager_root(telescope_id):
 
         telescope = list(filter(lambda tel: tel['device_num'] == telescope_id, telescopes))[0]
         if telescope:
-            root = f"http://{get_listening_ip()}:{Config.imgport}/{telescope['device_num']}"
+            url, real_telescope_id = base_url(telescope_id)
+            image_port = telescope.get('img_port') or Config.imgport
+            root = f"{url}:{image_port}/{real_telescope_id}"
             return root
     return ""
 
@@ -361,10 +429,12 @@ def update_planning_card_state(card_name, var, value):
         json.dump(state_data, planning_state_file, indent=4)
 
 
-def check_api_state(telescope_id):
+def check_api_state(telescope_id: int):
     if telescope_id == 0:
         return True
-    url = f"{base_url}/api/v1/telescope/{telescope_id}/connected?ClientID=1&ClientTransactionID=999"
+
+    url, real_telescope_id = base_url(telescope_id)
+    url = f"{url}:{Config.port}/api/v1/telescope/{real_telescope_id}/connected?ClientID=1&ClientTransactionID=999"
     try:
         r = requests.get(url, timeout=Config.timeout)
         r.raise_for_status()
