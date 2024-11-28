@@ -127,57 +127,11 @@ def get_messages():
     return []
 
 
-@cache
-def get_remote_telescopes():
-    remote_num = 100
-    remote_telescopes = []
-    # TODO include ports of remote!
-    for remote in Config.remotes:
-        ip_address = remote.get('ip_address')
-        remotes = get_telescope_devices(ip_address, 5555, remote_num)
-        remote_telescopes.extend(remotes)
-        # name, device_num
-        # r = requests.get(f"http://{ip_address}:5555/management/v1/configureddevices", timeout=Config.timeout)
-        # r.raise_for_status()
-        # response = r.json()
-        # values = response.get('Value')
-        # if len(values) == 1 and values[0].get('DeviceNumber') == 0:
-        #     values[0]['DeviceNumber'] = 1
-        # for tel in response.get('Value'):
-        #     remote_telescopes.append({
-        #         'name': tel['DeviceName'],
-        #         'device_num': remote_num + tel['DeviceNumber'],
-        #         'ip_address': ip_address,
-        #         'api_ip_address': ip_address,
-        #         'img_port': '7556',  # Todo : make this dynamic!
-        #         'location': remote.get('location'),
-        #         'remote_id': remote_num,
-        #     })
-        remote_num += 100
-    return remote_telescopes
-
 
 @cached(cache=TTLCache(maxsize=600, ttl=10))
 def get_telescopes() -> list[TelescopeDevice]:
-    # Todo : include local and remote telescopes
-    # telescopes = Config.seestars
-    # return list(telescopes)
-    telescopes = list([{
-        **dev,
-        'ip_address': dev['ip_address'],
-        'api_ip_address': get_listening_ip(),
-        'location': 'internal',
-        'telescope_id': dev['device_num'],
-        'remote_id': 0,
-    } for dev in Config.seestars])
-
     ip_address = get_listening_ip()
-    remotes = get_telescope_devices(ip_address)
-
-    print("Local list:", telescopes)
-    print("Remote list:", remotes)
-
-    return remotes
+    return get_telescope_devices(ip_address)
 
 
 def get_telescope(telescope_id: int) -> TelescopeDevice:
@@ -474,8 +428,9 @@ def queue_action(dev_num, payload):
     return []
 
 
-def do_action_device(action, dev_num, parameters, is_schedule=False):
-    url = f"{base_url}/api/v1/telescope/{dev_num}/action"
+def do_action_device(action: str, dev_num: int, parameters, is_schedule=False):
+    base, real_telescope_id = base_url(dev_num)
+    url = f"{base}:{Config.port}/api/v1/telescope/{real_telescope_id}/action"
     payload = {
         "Action": action,
         "Parameters": json.dumps(parameters),
@@ -517,17 +472,18 @@ def check_response(resp, response):
         flash(resp, "Item scheduled successfully")
 
 
-def method_sync(method, telescope_id=1, **kwargs):
+def method_sync(method, telescope_id: int = 1, **kwargs):
     out = do_action_device("method_sync", telescope_id, {"method": method, **kwargs})
+
     # print(f"method_sync {out=}")
 
     def err_extractor(obj):
         if obj and obj.get("error"):
             logger.warn(f"method_sync: {method} - {obj['error']}")
-            result = { "command": method, "status": "error", "result": obj["error"] }
+            result = {"command": method, "status": "error", "result": obj["error"]}
             return result
         elif obj:
-            result = { "command": method, "status": "success", "result": obj["result"] }
+            result = {"command": method, "status": "success", "result": obj["result"]}
             return result
 
     if out:
@@ -536,7 +492,7 @@ def method_sync(method, telescope_id=1, **kwargs):
             results = {}
             for tel in get_telescopes():
                 devnum = str(tel.get("device_num"))
-                if check_api_state(devnum) is False:
+                if check_api_state(int(devnum)) is False:
                     continue
                 dev_value = value.get(devnum) if value else None
                 results[devnum] = err_extractor(dev_value) or "Offline"
