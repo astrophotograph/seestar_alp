@@ -19,11 +19,16 @@ import numpy as np
 import tzlocal
 import queue
 import pydash
+
+from device.abstract_device import AbstractDevice
 from device.config import Config
-from device.version import Version # type: ignore
+from device.version import Version  # type: ignore
 from device.seestar_util import Util
 
 from collections import OrderedDict
+
+from lib.trace import MessageTrace
+
 
 class FixedSizeOrderedDict(OrderedDict):
     def __init__(self, *args, maxsize=None, **kwargs):
@@ -36,7 +41,7 @@ class FixedSizeOrderedDict(OrderedDict):
         super().__setitem__(key, value)
 
 
-class Seestar:
+class Seestar(AbstractDevice):
     def __new__(cls, *args, **kwargs):
         # print("Create a new instance of Seestar.")
         return super().__new__(cls)
@@ -52,11 +57,13 @@ class Seestar:
         self.device_name = device_name
         self.device_num = device_num
         self.cmdid: int = 10000
+        # todo : perhaps bundle some of these stats as an object that we can expose remotely?
+        # warning: latitude / longitude within 4 decimal places gives your coordinates within 10 meters
         self.site_latitude: float = Config.init_lat
         self.site_longitude: float = Config.init_long
         self.site_elevation: float = 0
-        self.ra: float = 0.0
-        self.dec: float = 0.0
+        self._ra: float = 0.0
+        self._dec: float = 0.0
         self.is_watch_events: bool = False  # Tracks if device has been started even if it never connected
         self.s: Optional[socket.socket] = None
         self.get_msg_thread: Optional[threading.Thread] = None
@@ -64,7 +71,7 @@ class Seestar:
         self.is_debug: bool = is_debug
         self.response_dict: OrderedDict[int, dict] = FixedSizeOrderedDict(max=100)
         self.logger = logger
-        self.is_connected: bool = False
+        self._is_connected: bool = False
         self.is_slewing: bool = False
         self.target_dec: float = 0
         self.target_ra: float = 0
@@ -153,11 +160,11 @@ class Seestar:
 
     def disconnect(self):
         # Disconnect tries to clean up socket if it exists
-        self.is_connected = False
+        self._is_connected = False
         self.socket_force_close()
 
     def reconnect(self):
-        if self.is_connected:
+        if self._is_connected:
             return True
 
         try:
@@ -170,27 +177,28 @@ class Seestar:
             self.s.settimeout(Config.timeout)
             self.s.connect((self.host, self.port))
             # self.s.settimeout(None)
-            self.is_connected = True
+            self._is_connected = True
             return True
         except socket.error as e:
             # Let's just delay a fraction of a second to avoid reconnecting too quickly
-            self.is_connected = False
+            self._is_connected = False
             sleep(1)
             return False
         except Exception as ex:
-            self.is_connected = False
+            self._is_connected = False
             sleep(1)
             return False
 
-    def get_socket_msg(self):
+    def get_socket_msg(self, first_run=True):
         try:
-            if self.s == None:
+            if self.s is None:
                 self.logger.warn("socket not initialized!")
                 time.sleep(3)
                 return None
             data = self.s.recv(1024 * 60)  # comet data is >50kb
         except socket.timeout:
-            self.logger.warn("Socket timeout")
+            # todo : add timeout logic!
+            self.logger.warn("Socket timeout in get_socket_msg")
             return None
         except socket.error as e:
             # todo : if general socket error, close socket, and kick off reconnect?
@@ -211,22 +219,22 @@ class Seestar:
     def update_equ_coord(self, parsed_data):
         if parsed_data['method'] == "scope_get_equ_coord" and 'result' in parsed_data:
             data_result = parsed_data['result']
-            self.ra = float(data_result['ra'])
-            self.dec = float(data_result['dec'] - self.below_horizon_dec_offset)
+            self._ra = float(data_result['ra'])
+            self._dec = float(data_result['dec'] - self.below_horizon_dec_offset)
 
     def update_view_state(self, parsed_data):
         if parsed_data['method'] == "get_view_state" and 'result' in parsed_data:
             view = parsed_data['result'].get('View')
             if view:
                 self.view_state = view
-            #else:
+            # else:
             #    self.view_state = {}
 
     def heartbeat_message_thread_fn(self):
         while self.is_watch_events:
             threading.current_thread().last_run = datetime.now()
 
-            if not self.is_connected and not self.reconnect():
+            if not self._is_connected and not self.reconnect():
                 sleep(5)
                 continue
 
@@ -1880,15 +1888,27 @@ class Seestar:
                 # todo : Disconnect socket and set is_watch_events false
                 pass
 
+    @property
+    def is_connected(self) -> bool:
+        return self._is_connected
+
+    @property
+    def dec(self) -> float:
+        return self._dec
+
+    @property
+    def ra(self) -> float:
+        return self._ra
+
     def end_watch_thread(self):
-        # I think it should be is_watch_events instead of is_connected...
-        if self.is_connected == True:
+        # I think it should be is_watch_events instead of _is_connected...
+        if self._is_connected:
             self.logger.info("End watch thread!")
             self.is_watch_events = False
             self.get_msg_thread.join(timeout=7)
             self.heartbeat_msg_thread.join(timeout=7)
             self.s.close()
-            self.is_connected = False
+            self._is_connected = False
 
     def get_events(self):
         while True:

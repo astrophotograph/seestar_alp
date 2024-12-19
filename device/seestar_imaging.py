@@ -21,6 +21,7 @@ from blinker import signal
 import sys
 
 from device import log
+from device.abstract_imager import AbstractImager
 from device.analysis.snr_analysis import SNRAnalysis
 from device.protocols.imager import SeestarImagerProtocol, ExposureModes
 from device.config import Config
@@ -52,7 +53,7 @@ def table(rows):
         ['<div class="row">' + "".join([f'<div class="col">{col}</div>' for col in row]) + "</div>" for row in rows])
 
 
-class SeestarImaging:
+class SeestarImaging(AbstractImager):
     def __new__(cls, *args, **kwargs):
         return super().__new__(cls)
 

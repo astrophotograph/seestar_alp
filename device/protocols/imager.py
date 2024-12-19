@@ -236,12 +236,17 @@ class SeestarImagerProtocol(SeestarBinaryProtocol):
     #     return 0, None, None, None
 
     def handle_preview_frame(self, width, height, data):
-        self.raw_img = data
-        self.raw_img_size = [width, height]
-        self.latest_image = self.convert_star_image(self.raw_img, width, height)
-        if Config.save_frames:
-            # save the raw frames
-            pass
+        try:
+            self.raw_img = data
+            self.raw_img_size = [width, height]
+            self.latest_image = self.convert_star_image(self.raw_img, width, height)
+            if Config.save_frames:
+                # save the raw frames
+                pass
+        except Exception as e:
+            self.logger.error(f"Exception handling preview frame: {e}")
+            self.raw_img = None
+            self.raw_img_size = [None, None]
 
     def handle_stack(self, width, height, data):
         # for stacking, we have to extract zipfile

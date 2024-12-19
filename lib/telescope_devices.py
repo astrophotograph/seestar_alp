@@ -13,7 +13,7 @@ class TelescopeDevice(TypedDict):
     telescope_id: int
     device_num: int # Alias for telescope_id
     # unique_id: str
-    remote_id: int
+    remote_offset: int
 
 
 def get_telescope_devices(ip_address: str, port: int = 5555, remote_offset: int = 0, timeout: int = 2) -> list[TelescopeDevice]:
@@ -33,7 +33,7 @@ def get_telescope_devices(ip_address: str, port: int = 5555, remote_offset: int 
         "location": tel.get('Location'),
         "telescope_id": remote_offset + tel['DeviceNumber'],
         "device_num": remote_offset + tel['DeviceNumber'],
-        "remote_id": remote_offset,
+        "remote_offset": remote_offset,
     } for tel in response.get('Value')]
 
     # 'name': tel['DeviceName'],

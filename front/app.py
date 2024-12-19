@@ -145,7 +145,7 @@ def base_url(telescope_id: int):
     if telescope_id > 99:
         tel = get_telescope(telescope_id)
 
-        real_telescope_id = tel['device_num'] - tel['remote_id']
+        real_telescope_id = tel['device_num'] - tel['remote_offset']
         # real_telescope_id = tel['device_num']
 
         return ["http://" + tel['api_ip_address'], real_telescope_id]
@@ -483,7 +483,7 @@ def method_sync(method, telescope_id: int = 1, **kwargs):
             result = {"command": method, "status": "error", "result": obj["error"]}
             return result
         elif obj:
-            result = {"command": method, "status": "success", "result": obj["result"]}
+            result = {"command": method, "status": "success", "result": obj.get("result")}
             return result
 
     if out:
@@ -1487,14 +1487,19 @@ class HomeResource:
     def on_get(req, resp):
         now = datetime.now()
         telescopes = get_telescopes_state()
+        if len(telescopes) == 0:
+            webui_theme = Config.uitheme
+            render_template(req, resp, 'no_telescopes.html', now=now)
+            return
+
         telescope = telescopes[0]  # We just force it to first telescope
         context = get_context(telescope['device_num'], req)
         del context["telescopes"]
         if len(telescopes) > 1:
             redirect(f"/{telescope['device_num']}/")
         else:
-            root = get_root(telescope['device_num'])
-            render_template(req, resp, 'index.html', now=now, telescopes=telescopes, **context) # pylint: disable=repeated-keyword
+            render_template(req, resp, 'index.html', now=now, telescopes=telescopes,
+                            **context)  # pylint: disable=repeated-keyword
 
 
 class HomeTelescopeResource:
@@ -1930,6 +1935,9 @@ class LivePage:
         now = datetime.now()
         match mode:
             case 'moon':
+                render_template(req, resp, 'live_moon.html', now=now, **context)
+
+            case 'solar_sys':
                 render_template(req, resp, 'live_moon.html', now=now, **context)
 
             case 'planet':

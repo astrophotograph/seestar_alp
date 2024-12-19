@@ -59,6 +59,8 @@ from wsgiref.simple_server import WSGIRequestHandler, make_server
 import os
 import time
 
+import requests
+
 # -- isort wants the above line to be blank --
 # Controller classes (for routing)
 from device import discovery
@@ -75,10 +77,13 @@ from device.shr import set_shr_logger
 # FOR EACH ASCOM DEVICE #
 #########################
 from device import telescope
+from lib.telescope_devices import get_telescope_devices
 
-#--------------
+# --------------
 API_VERSION = 1
-#--------------
+
+
+# --------------
 
 class LoggingWSGIRequestHandler(WSGIRequestHandler):
     """Subclass of  WSGIRequestHandler allowing us to control WSGI server's logging"""
@@ -234,9 +239,61 @@ class DeviceMain:
 
         for dev in Config.seestars:
             is_EQ_mode = dev.get('is_EQ_mode', Config.is_EQ_mode)
-            controller = telescope.start_seestar_device(logger, dev['name'], dev['ip_address'], 4700, dev['device_num'], is_EQ_mode)
+            controller = telescope.start_seestar_device(logger, dev['name'], dev['ip_address'], 4700, dev['device_num'],
+                                                        is_EQ_mode)
             telescope.start_seestar_imaging(logger, dev['name'], dev['ip_address'], 4800, dev['device_num'], controller)
-            telescope.start_seestar_logcollector(logger, dev['name'], dev['ip_address'], 4801, dev['device_num'], controller)
+            telescope.start_seestar_logcollector(logger, dev['name'], dev['ip_address'], 4801, dev['device_num'],
+                                                 controller)
+
+        if Config.remotes:
+            remote_num = 100
+            remote_telescopes = []
+            # TODO include ports of remote!
+            for remote in Config.remotes:
+                # name, device_num
+                ip_address = remote.get('ip_address')
+                port = 5555  # Todo : make dynamic!
+                telescopes = get_telescope_devices(ip_address, port, remote_num)
+
+                for tel in telescopes:
+                    telescope.start_remote_device(logger,
+                                                  tel['name'],
+                                                  ip_address,
+                                                  port,
+                                                  tel['device_num'],  # Device ID
+                                                  remote.get('location'),
+                                                  tel['remote_offset'])
+                    telescope.start_remote_imager(logger,
+                                                  tel['name'],
+                                                  ip_address,
+                                                  7556, # TODO: figure out remote image port!
+                                                  tel['device_num'],
+                                                  remote.get('location'),
+                                                  tel['remote_offset'])
+
+                # r = requests.get(f"http://{ip_address}:{port}/management/v1/configureddevices", timeout=Config.timeout)
+                ## todo : capture errors
+                # response = r.json()
+                # values = response.get('Value')
+                # if len(values) == 1 and values[0].get('DeviceNumber') == 0:
+                #    values[0]['DeviceNumber'] = 1
+                # for tel in response.get('Value'):
+                #    telescope.start_remote_device(logger,
+                #                                  tel['DeviceName'],
+                #                                  ip_address,
+                #                                  port,
+                #                                  remote_num + tel['DeviceNumber'],
+                #                                  remote.get('location'),
+                #                                  remote_num)
+                #    # remote_telescopes.append({
+                #    # 'name': tel['DeviceName'],
+                #    # 'device_num': remote_num + tel['DeviceNumber'],
+                #    # 'ip_address': ip_address,
+                #    # 'api_ip_address': ip_address,
+                #    # 'img_port': '7556',  # Todo : make this dynamic!
+                #    # 'location': remote.get('location'),
+                #    # 'remote_id': remote_num,
+                remote_num += 100
 
         #########################
         # FOR EACH ASCOM DEVICE #

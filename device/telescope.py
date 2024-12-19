@@ -15,21 +15,25 @@ import time
 from falcon import Request, Response, HTTPBadRequest, HTTPTemporaryRedirect, before
 from logging import Logger
 
+from device.abstract_device import AbstractDevice
+from device.abstract_imager import AbstractImager
 from device.seestar_logs import SeestarLogging
 from device.seestar_imaging import SeestarImaging
+from device.seestar_remote import SeestarRemote
+from device.seestar_remote_imaging import SeestarRemoteImaging
 from device.shr import PropertyResponse, MethodResponse, PreProcessRequest, \
                 get_request_field, to_bool
 from device.exceptions import *        # Nothing but exception classes
 from device.seestar_device import Seestar
-from seestar_federation import Seestar_Federation
+from seestar_federation import SeestarFederation
 from alpaca.telescope import *
 import json
 from device.seestar_util import Util    # RWR
 
 # logger: Logger = None
 
-seestar_dev = {}
-seestar_imager = {}
+seestar_dev: dict[int, AbstractDevice] = {}
+seestar_imager: dict[int, AbstractImager] = {}
 seestar_logcollector = {}
 
 # pylint: disable=no-value-for-parameter
@@ -65,9 +69,10 @@ class TelescopeMetadata:
 # At app init not import :-)
 def start_seestar_federation(logger: logger): # type: ignore
     global seestar_federation
-    seestar_federation = Seestar_Federation(logger, seestar_dev)
+    seestar_federation = SeestarFederation(logger, seestar_dev)
 
-def start_seestar_device(logger: logger, name: str, ip_address: str, port: int, device_num: int, is_EQ_mode: bool): # type: ignore
+
+def start_seestar_device(logger: logger, name: str, ip_address: str, port: int, device_num: int, is_EQ_mode: bool) -> AbstractDevice: # type: ignore
     # logger = logger
     global seestar_dev
     seestar_dev[device_num] = Seestar(logger, ip_address, port, name, device_num, is_EQ_mode, True)
@@ -75,10 +80,21 @@ def start_seestar_device(logger: logger, name: str, ip_address: str, port: int, 
     return seestar_dev[device_num]
 
 
-def start_seestar_imaging(logger: logger, name: str, ip_address: str, port: int, device_num: int, device: Seestar = None): #type: ignore
+def start_remote_device(logger: logger, name: str, ip_address: str, port: int, device_num: int, location: str, remote_offset: int) -> AbstractDevice: # type: ignore
+    seestar_dev[device_num] = SeestarRemote(logger, ip_address, port, name, device_num, location, remote_offset, True)
+    seestar_dev[device_num].start_watch_thread()
+    return seestar_dev[device_num]
+
+
+def start_seestar_imaging(logger: logger, name: str, ip_address: str, port: int, device_num: int, device: Seestar = None) -> AbstractImager: #type: ignore
     # logger = logger
     global seestar_imager
     seestar_imager[device_num] = SeestarImaging(logger, ip_address, port, name, device_num, device)
+    return seestar_imager[device_num]
+
+def start_remote_imager(logger: logger, name: str, ip_address: str, port: int, device_num: int, location: str, remote_offset: int) -> AbstractImager: # type: ignore
+    global seestar_imager
+    seestar_imager[device_num] = SeestarRemoteImaging(logger, ip_address, port, name, device_num, location, remote_offset)
     return seestar_imager[device_num]
 
 def start_seestar_logcollector(logger: logger, name: str, ip_address: str, port: int, device_num: int, device: Seestar = None): #type: ignore
@@ -87,12 +103,12 @@ def start_seestar_logcollector(logger: logger, name: str, ip_address: str, port:
     seestar_logcollector[device_num] = SeestarLogging(logger, ip_address, 4801, name, device_num, device)
     return seestar_logcollector[device_num]
 
-def get_seestar_imager(device_num: int):
+def get_seestar_imager(device_num: int) -> AbstractImager:
     global seestar_imager
     return seestar_imager[device_num]
 
 
-def get_seestar_device(device_num: int):
+def get_seestar_device(device_num: int) -> AbstractDevice:
     global seestar_dev
     return seestar_dev[device_num]
 
@@ -105,6 +121,10 @@ def end_seestar_device(device_num: int):
 def get_seestar_logcollector(device_num: int):
     global seestar_logcollector
     return seestar_logcollector[device_num]
+
+
+def telescopes():
+    print("telescopes:", len(seestar_dev), len(seestar_imager))
 
 # --------------------
 # RESOURCE CONTROLLERS

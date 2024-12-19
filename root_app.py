@@ -12,13 +12,13 @@ from watchdog.events import FileSystemEventHandler
 
 from front.app import FrontMain, get_live_status
 
-from device.app import DeviceMain     # type: ignore
-from device.config import Config      # type: ignore
-from device import log                     # type: ignore
-from device import telescope               # type: ignore
-
+from device.app import DeviceMain  # type: ignore
+from device.config import Config  # type: ignore
+from device import log  # type: ignore
+from device import telescope  # type: ignore
 
 import os
+
 
 class AppRunner:
     def __init__(self, log, name, app_main):
@@ -50,6 +50,7 @@ class AppRunner:
             handler.setLevel(Config.log_level)
         self.app_main.reload()
 
+
 class ConfigChangeHandler(FileSystemEventHandler):
     def __init__(self, path, alp, front):
         self.path = path
@@ -59,12 +60,13 @@ class ConfigChangeHandler(FileSystemEventHandler):
 
     def on_modified(self, event):
         if event.src_path == self.path:
-            #print(f'ConfigChangeHandler event type: {event.event_type}  path : {event.src_path}')
+            # print(f'ConfigChangeHandler event type: {event.event_type}  path : {event.src_path}')
             Config.load_toml()
             self.alp.reload()
             self.front.reload()
-        #else:
+        # else:
         #    print(f"ConfigChangeHandler Ignoring event type: {event.event_type}  path : {event.src_path}")
+
 
 if __name__ == "__main__":
     n = sdnotify.SystemdNotifier()
@@ -95,16 +97,23 @@ if __name__ == "__main__":
     CORS(app, supports_credentials=True)
 
 
-    @cross_origin()
-    @app.route("/<dev_num>/vid/status")
-    def vid_status(dev_num):
-        return Response(telescope.get_seestar_imager(int(dev_num)).get_video_status(),
-                        mimetype='text/event-stream')
+    # @cross_origin()
+    # @app.route("/<dev_num>/vid/status")
+    # def vid_status(dev_num):
+    #    # todo : check status
+    #     return Response(telescope.get_seestar_imager(int(dev_num)).get_video_status(),
+    #                     mimetype='text/event-stream')
 
     @cross_origin()
     @app.route("/<dev_num>/live/status")
     def live_status(dev_num):
-        return Response(get_live_status(int(dev_num)), mimetype='text/event-stream')
+        telescope_id = int(dev_num)
+
+        if telescope_id >= 100:
+            return Response(telescope.get_seestar_imager(telescope_id).get_live_status(),
+                            mimetype="text/event-stream")
+
+        return Response(get_live_status(telescope_id), mimetype='text/event-stream')
 
 
     @cross_origin()
@@ -119,6 +128,7 @@ if __name__ == "__main__":
     def vid(dev_num):
         return Response(telescope.get_seestar_imager(int(dev_num)).get_frame(),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
+
 
     n.notify("READY=1")
     print("Startup Complete")
