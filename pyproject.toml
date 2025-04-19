@@ -36,7 +36,7 @@ dependencies = [
     "toml==0.10.2",
     "tomlkit==0.13.2",
     "tzlocal==5.2",
-    "waitress==3.0.0",
+    "waitress==3.0.1",
     "watchdog==5.0.2",
 ]
 
